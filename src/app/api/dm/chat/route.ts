@@ -198,13 +198,10 @@ export async function POST(req: Request) {
   const d = parsed.data;
 
   // Find or create the active session for this campaign
-  let session = await prisma.session.findFirst({
+  const session = await prisma.session.findFirst({
     where: { campaignId: d.campaignId, endedAt: null },
     orderBy: { startedAt: "desc" },
-  });
-  if (!session) {
-    session = await prisma.session.create({ data: { campaignId: d.campaignId } });
-  }
+  }) ?? await prisma.session.create({ data: { campaignId: d.campaignId } });
   await prisma.campaign.update({
     where: { id: d.campaignId },
     data: { lastPlayedAt: new Date() },
@@ -290,24 +287,25 @@ export async function POST(req: Request) {
         }
 
         if (finalOutput) {
-          // Apply effects FIRST so any side-effects (e.g. applyDamage) land
-          // before the message is committed and emitted to the client.
-          const applied = await applyEffects(d, session!.id, finalOutput.effects);
-
+          // Persist the DM message first. If effects fail afterwards, the
+          // player still sees the narration and can retry the action.
           const m = await prisma.message.create({
             data: {
-              sessionId: session!.id,
+              sessionId: session.id,
               role: "dm",
               kind: "text",
               content: finalOutput.narration,
             },
           });
 
+          // Apply effects after the message is safely committed.
+          const applied = await applyEffects(d, session.id, finalOutput.effects);
+
           controller.enqueue(
             encoder.encode(
               `data: ${JSON.stringify({
                 type: "final",
-                sessionId: session!.id,
+                sessionId: session.id,
                 messageId: m.id,
                 message: {
                   id: m.id,

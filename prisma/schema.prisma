@@ -356,6 +356,7 @@ model CombatEncounter {
   endedAt     DateTime?
 
   combatants  Combatant[]
+  snapshots   ActionEconomySnapshot[]
 
   @@index([campaignId])
   @@index([sessionId])
@@ -396,6 +397,7 @@ model Combatant {
 model ActionEconomySnapshot {
   id          String   @id @default(cuid())
   encounterId String
+  encounter   CombatEncounter @relation(fields: [encounterId], references: [id], onDelete: Cascade)
   round       Int
   turnIndex   Int
   payload     String   // JSON: ActionEconomySnapshot

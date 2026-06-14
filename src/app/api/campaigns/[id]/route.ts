@@ -16,7 +16,8 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
-  const { id: _ignore, ...patch } = parsed.data;
+  const { id: _, ...patch } = parsed.data;
+  void _;
   const c = await campaignRepo.update(id, patch);
   return NextResponse.json({ campaign: c });
 }

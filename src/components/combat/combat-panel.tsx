@@ -6,8 +6,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input, Label } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { roll } from "@/engine/dice";
-import { applyDamage, applyHeal } from "@/engine/combat";
-import type { CombatEncounterDTO, CharacterDTO, CombatantDTO } from "@/lib/types";
+import { applyDamage } from "@/engine/combat";
+import type { CombatEncounterDTO, CharacterDTO } from "@/lib/types";
 
 interface Props {
   campaignId: string;

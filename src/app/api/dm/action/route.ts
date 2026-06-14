@@ -4,7 +4,7 @@ import { prisma } from "@/db/client";
 import { safeJsonParse } from "@/lib/utils";
 import { abilityCheck, attackRoll, savingThrow, skillCheck } from "@/engine/rules";
 import { formatRoll, roll } from "@/engine/dice";
-import type { AITurnOutput, MessageDTO } from "@/lib/types";
+import type { AbilityKey, AITurnOutput, MessageDTO, SkillKey } from "@/lib/types";
 
 export const runtime = "nodejs";
 
@@ -36,8 +36,8 @@ export async function POST(req: Request) {
   const ctx = {
     abilityScores,
     level: char.level,
-    skillProfs: skillProfs as never,
-    saveProfs: saveProfs as never,
+    skillProfs: skillProfs as SkillKey[],
+    saveProfs: saveProfs as AbilityKey[],
   };
 
   // Death save lifecycle
