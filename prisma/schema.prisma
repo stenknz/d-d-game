@@ -1,0 +1,442 @@
+// AI Dungeon Master — Prisma schema
+// SQLite for v1; same models work with Postgres by switching the provider.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ───────────────────────────────────────────────────────────────
+// USERS (optional, single-profile local install)
+// ───────────────────────────────────────────────────────────────
+
+model User {
+  id        String   @id @default(cuid())
+  handle    String   @unique
+  createdAt DateTime @default(now())
+  campaigns Campaign[]
+}
+
+// ───────────────────────────────────────────────────────────────
+// CAMPAIGNS
+// ───────────────────────────────────────────────────────────────
+
+model Campaign {
+  id              String   @id @default(cuid())
+  name            String
+  summary         String?
+  systemVersion   String   @default("5.5e-2024")
+  currentLocation String?
+  coverImage      String?
+  archived        Boolean  @default(false)
+  lastPlayedAt    DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  ownerId         String?
+  owner           User?    @relation(fields: [ownerId], references: [id])
+
+  characters      Character[]
+  npcs            NPC[]
+  locations       Location[]
+  items           Item[]
+  quests          Quest[]
+  lore            LoreEntry[]
+  events          Event[]
+  sessions        Session[]
+  memories        Memory[]
+  encounters      CombatEncounter[]
+
+  @@index([ownerId])
+  @@index([archived])
+}
+
+// ───────────────────────────────────────────────────────────────
+// CHARACTERS
+// ───────────────────────────────────────────────────────────────
+
+model Character {
+  id            String   @id @default(cuid())
+  campaignId    String
+  campaign      Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  name          String
+  species       String   // 2024 terminology: "species" not "race"
+  class         String
+  subclass       String?
+  background    String?
+  alignment     String?
+  level         Int      @default(1)
+  xp            Int      @default(0)
+  profBonus     Int      @default(2)
+
+  // Ability scores stored as JSON: { str, dex, con, int, wis, cha }
+  abilityScores String   // JSON
+
+  hp            Int      @default(0)
+  maxHp         Int      @default(0)
+  tempHp        Int      @default(0)
+  ac            Int      @default(10)
+  initiativeMod Int      @default(0)
+  speed         Int      @default(30)
+
+  // JSON arrays: skillProfs[], saveProfs[], conditions[], spellSlots{}
+  skillProfs    String   // JSON: string[]
+  saveProfs     String   // JSON: string[]
+  conditions    String   // JSON: string[]
+  spellSlots    String   // JSON: Record<number, {max,used}>
+
+  // Death save tracking
+  deathSuccess  Int      @default(0)
+  deathFail     Int      @default(0)
+
+  // Notes & description (DM-authored or system-generated)
+  notes         String?
+
+  // Feats / features
+  feats         String   // JSON: string[]
+
+  portraitUrl   String?
+  isAlive       Boolean  @default(true)
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  inventory     InventoryItem[]
+  memories      Memory[]
+  combatantAs   Combatant[] @relation("CombatantCharacter")
+
+  @@index([campaignId])
+}
+
+// ───────────────────────────────────────────────────────────────
+// NPCS
+// ───────────────────────────────────────────────────────────────
+
+model NPC {
+  id          String   @id @default(cuid())
+  campaignId  String
+  campaign    Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  name        String
+  species     String?
+  role        String?  // blacksmith, guard, innkeeper…
+  faction     String?
+  locationId  String?
+  location    Location? @relation(fields: [locationId], references: [id])
+
+  // Stats mirror character; NPC statblocks stored as JSON
+  stats       String   // JSON: { hp, maxHp, ac, init, abilities, attacks[] }
+  personality String   // JSON: { traits, ideals, bonds, flaws, voice }
+
+  // Reputation per character, stored as JSON map
+  reputation  String   // JSON: Record<characterId, number>
+
+  secrets     String   // JSON: string[]
+  notes       String?
+
+  portraitUrl String?
+  isAlive     Boolean  @default(true)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  memories    NPCMemory[]
+  questGivers Quest[]      @relation("QuestGiver")
+
+  @@index([campaignId])
+  @@index([locationId])
+}
+
+// NPC-specific memories (separate from world memory for fast access)
+model NPCMemory {
+  id          String   @id @default(cuid())
+  npcId       String
+  npc         NPC      @relation(fields: [npcId], references: [id], onDelete: Cascade)
+  characterId String?
+  kind        String   // event | relationship | secret
+  summary     String
+  importance  Float    @default(0.5)
+  embedding   Bytes?
+  createdAt   DateTime @default(now())
+
+  @@index([npcId])
+  @@index([characterId])
+}
+
+// ───────────────────────────────────────────────────────────────
+// LOCATIONS
+// ───────────────────────────────────────────────────────────────
+
+model Location {
+  id          String   @id @default(cuid())
+  campaignId  String
+  campaign    Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  parentId    String?
+  parent      Location? @relation("LocationHierarchy", fields: [parentId], references: [id])
+  children    Location[] @relation("LocationHierarchy")
+
+  name        String
+  kind        String   // region | city | town | dungeon | building | room
+  description String?
+  tags        String   // JSON: string[]
+
+  npcs        NPC[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([campaignId])
+  @@index([parentId])
+}
+
+// ───────────────────────────────────────────────────────────────
+// ITEMS / INVENTORY
+// ───────────────────────────────────────────────────────────────
+
+model Item {
+  id          String   @id @default(cuid())
+  campaignId  String
+  campaign    Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  name        String
+  kind        String   // weapon | armor | wondrous | consumable | treasure
+  rarity      String?  // common | uncommon | rare | very_rare | legendary
+  attunement  Boolean  @default(false)
+  properties  String   // JSON: Record<string, any>
+  description String?
+  createdAt   DateTime @default(now())
+
+  inventory   InventoryItem[]
+  @@index([campaignId])
+}
+
+// One row per (item, owner) pair. Owner is either a Character or a Campaign stash.
+model InventoryItem {
+  id          String   @id @default(cuid())
+  itemId      String
+  item        Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  characterId String?
+  character   Character? @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  quantity    Int      @default(1)
+  equipped    Boolean  @default(false)
+  notes       String?
+
+  @@index([characterId])
+  @@index([itemId])
+}
+
+// ───────────────────────────────────────────────────────────────
+// QUESTS
+// ───────────────────────────────────────────────────────────────
+
+model Quest {
+  id          String   @id @default(cuid())
+  campaignId  String
+  campaign    Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  title       String
+  kind        String   // main | side | faction | personal
+  description String
+  status      String   @default("active") // active | completed | failed | abandoned
+  giverId     String?
+  giver       NPC?     @relation("QuestGiver", fields: [giverId], references: [id])
+  rewards     String   // JSON: { xp, gold, items[] }
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  completedAt DateTime?
+
+  objectives  Objective[]
+
+  @@index([campaignId])
+  @@index([status])
+}
+
+model Objective {
+  id          String   @id @default(cuid())
+  questId     String
+  quest       Quest    @relation(fields: [questId], references: [id], onDelete: Cascade)
+  description String
+  status      String   @default("active") // active | completed | failed
+  completedAt DateTime?
+  order       Int      @default(0)
+}
+
+// ───────────────────────────────────────────────────────────────
+// LORE
+// ───────────────────────────────────────────────────────────────
+
+model LoreEntry {
+  id          String   @id @default(cuid())
+  campaignId  String
+  campaign    Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  kind        String   // kingdom | religion | faction | war | event | legend | npc
+  title       String
+  body        String
+  tags        String   // JSON: string[]
+  importance  Float    @default(0.5)
+  embedding   Bytes?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([campaignId])
+  @@index([kind])
+}
+
+// ───────────────────────────────────────────────────────────────
+// EVENTS (append-only log)
+// ───────────────────────────────────────────────────────────────
+
+model Event {
+  id          String   @id @default(cuid())
+  campaignId  String
+  campaign    Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  sessionId   String?
+  session     Session? @relation(fields: [sessionId], references: [id])
+  type        String   // roll | damage | heal | condition | travel | dialogue | system
+  payload     String   // JSON
+  createdAt   DateTime @default(now())
+
+  @@index([campaignId])
+  @@index([sessionId])
+  @@index([type])
+}
+
+// ───────────────────────────────────────────────────────────────
+// SESSIONS & MESSAGES
+// ───────────────────────────────────────────────────────────────
+
+model Session {
+  id          String   @id @default(cuid())
+  campaignId  String
+  campaign    Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  startedAt   DateTime @default(now())
+  endedAt     DateTime?
+  summary     String?
+
+  messages    Message[]
+  events      Event[]
+  encounters  CombatEncounter[]
+
+  @@index([campaignId])
+}
+
+model Message {
+  id          String   @id @default(cuid())
+  sessionId   String
+  session     Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  role        String   // player | dm | system
+  kind        String   @default("text") // text | dice | image | summary
+  content     String
+  refs        String?  // JSON: { characterId?, npcId?, questId?, ... }
+  createdAt   DateTime @default(now())
+
+  @@index([sessionId])
+}
+
+// ───────────────────────────────────────────────────────────────
+// COMBAT
+// ───────────────────────────────────────────────────────────────
+
+model CombatEncounter {
+  id          String   @id @default(cuid())
+  campaignId  String
+  campaign    Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  sessionId   String?
+  session     Session? @relation(fields: [sessionId], references: [id])
+  name        String?
+  status      String   @default("idle") // idle | rolling | active | ended
+  round       Int      @default(0)
+  turnIndex   Int      @default(0)
+  createdAt   DateTime @default(now())
+  endedAt     DateTime?
+
+  combatants  Combatant[]
+
+  @@index([campaignId])
+  @@index([sessionId])
+}
+
+model Combatant {
+  id            String   @id @default(cuid())
+  encounterId   String
+  encounter     CombatEncounter @relation(fields: [encounterId], references: [id], onDelete: Cascade)
+  characterId   String?
+  character     Character? @relation("CombatantCharacter", fields: [characterId], references: [id])
+  npcId         String?
+  name          String
+  side          String   // pc | ally | enemy | neutral
+  initiative    Int
+  maxHp         Int
+  hp            Int
+  tempHp        Int      @default(0)
+  ac            Int
+  initMod       Int      @default(0)
+  conditions    String   // JSON: string[]
+  // action economy tracking — reset each turn
+  actionUsed    Boolean  @default(false)
+  bonusUsed     Boolean  @default(false)
+  reactionUsed  Boolean  @default(false)
+  movementUsed  Int      @default(0)
+  speed         Int      @default(30)
+  isDead        Boolean  @default(false)
+  // Hidden stats for AI narration: attacks[], abilities[]
+  statblock     String   // JSON
+  order         Int
+
+  @@index([encounterId])
+}
+
+// Per-turn snapshots so the "prev turn" action can restore action economy
+// flags, HP, and conditions that were live at the time the snapshot was taken.
+model ActionEconomySnapshot {
+  id          String   @id @default(cuid())
+  encounterId String
+  round       Int
+  turnIndex   Int
+  payload     String   // JSON: ActionEconomySnapshot
+  createdAt   DateTime @default(now())
+
+  @@unique([encounterId, round, turnIndex])
+  @@index([encounterId])
+}
+
+// ───────────────────────────────────────────────────────────────
+// MEMORY (long/short-term, RAG)
+// ───────────────────────────────────────────────────────────────
+
+model Memory {
+  id          String   @id @default(cuid())
+  campaignId  String
+  campaign    Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  characterId String?
+  character   Character? @relation(fields: [characterId], references: [id])
+  scope       String   // short | long
+  content     String
+  importance  Float    @default(0.5)
+  embedding   Bytes?
+  refs        String?  // JSON: { npcId?, questId?, locationId? }
+  createdAt   DateTime @default(now())
+
+  @@index([campaignId])
+  @@index([characterId])
+  @@index([scope])
+}
+
+// ───────────────────────────────────────────────────────────────
+// SETTINGS (singleton)
+// ───────────────────────────────────────────────────────────────
+
+model Settings {
+  id            String   @id @default("singleton")
+  defaultModel  String   @default("llama3.1:8b")
+  temperature   Float    @default(0.7)
+  contextLength Int      @default(8192)
+  promptOverrides String @default("{}") // JSON: Record<promptKey, string>
+  theme         String   @default("dark-fantasy")
+  updatedAt     DateTime @updatedAt
+}

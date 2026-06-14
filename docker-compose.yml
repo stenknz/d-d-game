@@ -1,0 +1,45 @@
+# Docker compose for AI Dungeon Master.
+# Brings up the Next.js app AND a local Ollama service so inference works
+# out of the box. Works on Linux and macOS (Docker Desktop). On Windows
+# you may need WSL2 backend.
+#
+# Quick start:
+#   docker compose up --build
+#   docker compose exec ollama ollama pull llama3.1:8b
+#   open http://localhost:3000
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: dd-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:11434/api/tags"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  app:
+    build: .
+    container_name: dd-app
+    restart: unless-stopped
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      OLLAMA_BASE_URL: http://ollama:11434
+      DEFAULT_MODEL: llama3.1:8b
+      DATABASE_URL: file:/app/prisma/dev.db
+    ports:
+      - "3000:3000"
+    volumes:
+      - app_data:/app/prisma
+
+volumes:
+  ollama_data:
+  app_data:
