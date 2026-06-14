@@ -32,26 +32,22 @@ export default async function CampaignPage({ params }: { params: Promise<{ id: s
     : [];
 
   return (
-    <main className="container mx-auto max-w-7xl py-6">
-      <header className="mb-4 flex items-center justify-between">
-        <div>
-          <h1 className="font-display text-3xl">{c.name}</h1>
-          <p className="text-sm text-muted-foreground">
-            {c.currentLocation ? `📍 ${c.currentLocation}` : "No location set"} ·{" "}
-            {characters.length} character{characters.length === 1 ? "" : "s"}
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <Button asChild variant="outline"><Link href={`/campaign/${id}/new-character`}>+ Character</Link></Button>
-          <Button asChild variant="ghost"><Link href="/dashboard">Back</Link></Button>
-        </div>
-      </header>
+    <div>
+      <p className="mb-4 text-sm text-muted-foreground">
+        {c.currentLocation ? `📍 ${c.currentLocation}` : "No location set"} ·{" "}
+        {characters.length} character{characters.length === 1 ? "" : "s"}
+      </p>
+      <div className="mb-4">
+        <Button asChild variant="outline" size="sm">
+          <Link href={`/campaign/${id}/new-character`}>+ Character</Link>
+        </Button>
+      </div>
       <SessionView
         campaignId={id}
         characters={characters}
         initialSessionId={session?.id}
         initialMessages={initialMessages}
       />
-    </main>
+    </div>
   );
 }
