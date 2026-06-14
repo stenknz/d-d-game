@@ -23,7 +23,6 @@ export function SessionView({ campaignId, characters, initialSessionId, initialM
   const [messages, setMessages] = React.useState<MessageDTO[]>(initialMessages);
   const [input, setInput] = React.useState("");
   const [streaming, setStreaming] = React.useState(false);
-  const [dmLive, setDmLive] = React.useState("");
   const [activeCharacterId, setActiveCharacterId] = React.useState<string | undefined>(characters[0]?.id);
   const [party, setParty] = React.useState<CharacterDTO[]>(characters);
   const [removingId, setRemovingId] = React.useState<string | null>(null);
@@ -32,7 +31,7 @@ export function SessionView({ campaignId, characters, initialSessionId, initialM
 
   React.useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [messages.length, dmLive]);
+  }, [messages.length]);
 
   async function removeCharacter(id: string, name: string) {
     if (removingId) return;
@@ -59,7 +58,6 @@ export function SessionView({ campaignId, characters, initialSessionId, initialM
     const text = input.trim();
     setInput("");
     setStreaming(true);
-    setDmLive("");
 
     // Optimistic player message
     const playerMsg: MessageDTO = {
@@ -100,11 +98,8 @@ export function SessionView({ campaignId, characters, initialSessionId, initialM
           if (!line || line === "[DONE]") continue;
           try {
             const parsed = JSON.parse(line);
-            if (parsed.type === "token" && parsed.text) {
-              setDmLive((cur) => cur + parsed.text);
-            } else if (parsed.type === "final" && parsed.message) {
+            if (parsed.type === "final" && parsed.message) {
               setMessages((m) => [...m, parsed.message]);
-              setDmLive("");
               if (parsed.sessionId && !sessionId) setSessionId(parsed.sessionId);
             }
           } catch {
@@ -113,7 +108,16 @@ export function SessionView({ campaignId, characters, initialSessionId, initialM
         }
       }
     } catch (e) {
-      setDmLive(`(the DM is silent — ${e instanceof Error ? e.message : "stream failed"})`);
+      setMessages((m) => [
+        ...m,
+        {
+          id: `err-${Date.now()}`,
+          role: "dm",
+          kind: "text",
+          content: `(the DM is silent — ${e instanceof Error ? e.message : "stream failed"})`,
+          createdAt: new Date().toISOString(),
+        },
+      ]);
     } finally {
       setStreaming(false);
     }
@@ -204,14 +208,14 @@ export function SessionView({ campaignId, characters, initialSessionId, initialM
                   </div>
                 </div>
               ))}
-              {streaming && dmLive && (
+              {streaming && (
                 <div className="flex justify-start">
                   <div className="max-w-[80%] rounded-lg border border-border bg-card p-3 text-sm">
                     <div className="mb-1 text-xs uppercase tracking-wider text-muted-foreground">
                       dm
                     </div>
-                    <div className="whitespace-pre-wrap leading-relaxed streaming-caret">
-                      {dmLive}
+                    <div className="text-muted-foreground streaming-caret">
+                      The DM is speaking…
                     </div>
                   </div>
                 </div>
