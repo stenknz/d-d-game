@@ -1,4 +1,6 @@
+import Link from "next/link";
 import { prisma } from "@/db/client";
+import { Button } from "@/components/ui/button";
 import { SettingsForm } from "@/components/settings/settings-form";
 
 export const dynamic = "force-dynamic";
@@ -11,6 +13,11 @@ export default async function SettingsPage() {
   });
   return (
     <main className="container mx-auto max-w-3xl py-10">
+      <div className="mb-4">
+        <Button asChild variant="ghost" size="sm">
+          <Link href="/dashboard">&larr; Back</Link>
+        </Button>
+      </div>
       <h1 className="mb-6 font-display text-3xl">Settings</h1>
       <SettingsForm
         defaultModel={settings.defaultModel}

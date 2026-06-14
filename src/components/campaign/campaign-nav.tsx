@@ -8,6 +8,7 @@ const NAV_ITEMS = [
   { label: "Quests", href: (id: string) => `/campaign/${id}/quests` },
   { label: "Lore", href: (id: string) => `/campaign/${id}/lore` },
   { label: "Items", href: (id: string) => `/campaign/${id}/items` },
+  { label: "Settings", href: () => "/settings" },
 ] as const;
 
 export function CampaignNav({ campaignId, current }: { campaignId: string; current: string }) {

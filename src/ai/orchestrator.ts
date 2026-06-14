@@ -50,6 +50,139 @@ function buildUserMessage(ctx: OrchestratorContext): string {
   return parts.join("\n");
 }
 
+/**
+ * Incremental JSON scanner that emits the characters INSIDE the value of
+ * the top-level "narration" field. As the model streams JSON, the user only
+ * sees the narration text — not the surrounding `{`, `}`, `:`, `"`, etc.
+ *
+ * Handles:
+ *  - Whitespace and structural characters
+ *  - Skipping past `"effects"` (and any other non-narration fields)
+ *  - String escape sequences (`\\n`, `\\"`, `\\\\`, `\\uXXXX`)
+ */
+class NarrationStreamer {
+  private state: "seeking" | "in_value" | "after" = "seeking";
+  private buf = "";
+  private escape = false;
+  private narration = "";
+
+  /** Feed new tokens; returns narration text that has become newly available. */
+  feed(chunk: string): string {
+    this.buf += chunk;
+    let emitted = "";
+
+    while (this.buf.length > 0) {
+      if (this.state === "after") {
+        this.buf = "";
+        break;
+      }
+
+      if (this.state === "seeking") {
+        // Look for the key "narration" at the top level. We use a simple
+        // match against the buffered text — the LLM outputs strict JSON.
+        const idx = this.buf.indexOf('"narration"');
+        if (idx === -1) {
+          // Keep at most a tail of 12 chars so we can still detect a
+          // "narration" key that arrives split across chunks.
+          if (this.buf.length > 12) this.buf = this.buf.slice(-12);
+          break;
+        }
+        this.buf = this.buf.slice(idx + '"narration"'.length);
+        // Skip whitespace and the colon
+        this.buf = this.buf.replace(/^[\s,:]+/, "");
+        if (this.buf.length === 0) break;
+        // We expect a string value starting with `"`
+        if (this.buf[0] === '"') {
+          this.buf = this.buf.slice(1);
+          this.state = "in_value";
+          this.escape = false;
+        } else {
+          // Unexpected — give up and skip the rest
+          this.state = "after";
+          this.buf = "";
+          break;
+        }
+      }
+
+      if (this.state === "in_value") {
+        let i = 0;
+        while (i < this.buf.length) {
+          const ch = this.buf[i];
+          if (this.escape) {
+            switch (ch) {
+              case "n":
+                emitted += "\n";
+                break;
+              case "t":
+                emitted += "\t";
+                break;
+              case "r":
+                emitted += "\r";
+                break;
+              case '"':
+                emitted += '"';
+                break;
+              case "\\":
+                emitted += "\\";
+                break;
+              case "/":
+                emitted += "/";
+                break;
+              case "b":
+                emitted += "\b";
+                break;
+              case "f":
+                emitted += "\f";
+                break;
+              case "u":
+                // \uXXXX — try to decode; fall back to raw
+                if (i + 4 < this.buf.length) {
+                  const hex = this.buf.slice(i + 1, i + 5);
+                  const code = parseInt(hex, 16);
+                  if (!isNaN(code)) {
+                    emitted += String.fromCharCode(code);
+                    i += 4;
+                  } else {
+                    emitted += ch;
+                  }
+                } else {
+                  // Need more input
+                  this.buf = this.buf.slice(i);
+                  this.narration += emitted;
+                  return this.narration;
+                }
+                break;
+              default:
+                emitted += ch;
+            }
+            this.escape = false;
+          } else if (ch === "\\") {
+            this.escape = true;
+          } else if (ch === '"') {
+            // End of the narration string value
+            this.narration += emitted;
+            this.state = "after";
+            this.buf = this.buf.slice(i + 1);
+            return this.narration;
+          } else {
+            emitted += ch;
+          }
+          i++;
+        }
+        this.narration += emitted;
+        this.buf = "";
+        return this.narration;
+      }
+    }
+
+    return this.narration;
+  }
+
+  get text(): string {
+    return this.narration;
+  }
+}
+
 export const orchestrator = {
   async complete(ctx: OrchestratorContext): Promise<OrchestratorResult> {
     const model = ctx.model ?? env.defaultModel;
@@ -90,7 +223,9 @@ export const orchestrator = {
       { role: "system", content: getSystemPrompt(ctx.mode, ctx.promptOverrides) },
       { role: "user", content: buildUserMessage(ctx) },
     ];
+    const streamer = new NarrationStreamer();
     let raw = "";
+    let lastEmitted = "";
     for await (const chunk of ollama.chatStream({
       model,
       messages,
@@ -101,14 +236,21 @@ export const orchestrator = {
       const piece = chunk.message?.content ?? "";
       if (piece) {
         raw += piece;
-        yield { type: "token", text: piece };
+        const text = streamer.feed(piece);
+        if (text.length > lastEmitted.length) {
+          const delta = text.slice(lastEmitted.length);
+          lastEmitted = text;
+          yield { type: "token", text: delta };
+        }
       }
       if (chunk.done) break;
     }
+    // Final parse: prefer the buffered raw (most reliable); fall back to
+    // whatever the streamer extracted.
     const parsed = extractJson(raw);
     const validated = validateAiOutput(parsed);
     const output: AITurnOutput = validated ?? {
-      narration: raw.trim().slice(0, 4000) || "(the DM pauses…)",
+      narration: streamer.text.trim() || raw.trim().slice(0, 4000) || "(the DM pauses…)",
       effects: [],
     };
     yield { type: "final", output, model };
